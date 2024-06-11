@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIFF to WAV Player</title>
+</head>
+<body>
+    <h1>AIFF to WAV Player</h1>
+    <input type="file" id="aiffFile" accept=".aiff">
+
+
+    <button id="playButton">Play</button>
+
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let wavAudioBuffer = null;
+
+        function aiffToWav(aiffBuffer) {
+            const aiffView = new DataView(aiffBuffer);
+            let offset = 12;
+
+            // AIFF stores the sample rate as an 80bit Float
+            function readFloat80(buffer, offset) {
+                const expon = (buffer.getUint16(offset) & 0x7FFF) - 16383;
+                const hiMant = buffer.getUint32(offset + 2);
+                const loMant = buffer.getUint32(offset + 6);
+                let value = hiMant * Math.pow(2, expon - 31) + loMant * Math.pow(2, expon - 63);
+                if (buffer.getUint16(offset) & 0x8000) {
+                    value = -value;
+                }
+                return value;
+            }
+
+            let foundCOMM = false;
+            let foundSSND = false;
+            let channels = 0;
+            let sampleFrames = 0;
+            let bitsPerSample = 0;
+            let sampleRate = 0;
+            let ssndSectionSize = 0;
+
+            const CHUNK_HEADER_BYTE_SIZE = 8; // chunkId + chunkSize
+
+            // Look for the 'COMM' chunk
+            while (offset < aiffView.byteLength) {
+                const chunkId = aiffView.getUint32(offset);
+                const chunkSize = aiffView.getUint32(offset + 4);
+
+                if (chunkId === 0x434f4d4d) {  // 'COMM'
+                    foundCOMM = true;
+                    channels = aiffView.getUint16(offset + 8);
+                    sampleFrames = aiffView.getUint32(offset + 10);
+                    bitsPerSample = aiffView.getUint16(offset + 14);
+                    sampleRate = readFloat80(aiffView, offset + 16);
+                } else if (chunkId === 0x53534e44) { // "SSND"
+                    foundSSND = true;
+                    // typedef struct {
+                    //     ckId: "SSND";
+                    //     ckSize: long; // size not including CHUNK_HEADER_BYTE_SIZE
+                    //     offset: unsigned long; // normally 0
+                    //     blockSize: unsigned long; // normally 0
+                    //     soundData: unsigned char[];
+                    // }  SoundDataChunk;
+                    ssndSectionSize = chunkSize - CHUNK_HEADER_BYTE_SIZE;
+                    ssndSectionOffset = offset + CHUNK_HEADER_BYTE_SIZE + 8; // 4 bytes each for `offset`, `blockSize`
+                }
+
+                if (foundCOMM && foundSSND) break;
+
+                offset += CHUNK_HEADER_BYTE_SIZE + chunkSize;
+            }
+
+
+            if (!foundCOMM || !foundSSND) {
+                throw new Error("COMM + SSND chunks not found in AIFF file");
+            }
+
+            const totalSampleByteSize = sampleFrames * channels * bitsPerSample / 8;
+            if (ssndSectionSize !== totalSampleByteSize) {
+                throw new Error("SSND section does not contain all samples");
+            } 
+
+            const wavFileSize = totalSampleByteSize + 44; // 44 == wav header size
+            const wav = new ArrayBuffer(wavFileSize);
+            const wavView = new DataView(wav);
+
+            // RIFF header
+            wavView.setUint32(0, 0x52494646, false);  // 'RIFF'
+            wavView.setUint32(4, wavFileSize - 8, true); // -8 presumably because of "RIFF" + "WAVE"
+            wavView.setUint32(8, 0x57415645, false);  // 'WAVE'
+
+            // fmt chunk
+            wavView.setUint32(12, 0x666d7420, false);  // 'fmt '
+            wavView.setUint32(16, 16, true);  // Size of fmt chunk
+            wavView.setUint16(20, 1, true);  // Audio format (1 = PCM)
+            wavView.setUint16(22, channels, true);  // Number of channels
+            wavView.setUint32(24, sampleRate, true);  // Sample rate
+            wavView.setUint32(28, sampleRate * channels * bitsPerSample / 8, true);  // Byte rate
+            wavView.setUint16(32, channels * bitsPerSample / 8, true);  // Block align
+            wavView.setUint16(34, bitsPerSample, true);  // Bits per sample
+
+            // data chunk
+            wavView.setUint32(36, 0x64617461, false);  // 'data'
+            wavView.setUint32(40, totalSampleByteSize, true);  // Data size
+
+            // Copy and convert audio data from big-endian to little-endian
+            let aiffDataOffset = ssndSectionOffset;
+            let wavDataOffset = 44;
+
+            switch (bitsPerSample) {
+                case 16: {
+                    while (wavDataOffset < wavFileSize) {
+                        const sample = aiffView.getInt16(aiffDataOffset, false);  // Read big-endian sample
+                        wavView.setInt16(wavDataOffset, sample, true);  // Write little-endian sample
+                        wavDataOffset += 2;
+                        aiffDataOffset += 2;
+                    }
+
+                    break;
+                }
+
+                case 24: {
+                    while (wavDataOffset < wavFileSize) {
+                        wavView.setUint8(wavDataOffset + 0, aiffView.getUint8(aiffDataOffset + 2));
+                        wavView.setUint8(wavDataOffset + 1, aiffView.getUint8(aiffDataOffset + 1));
+                        wavView.setUint8(wavDataOffset + 2, aiffView.getUint8(aiffDataOffset + 0));
+                        wavDataOffset += 3;
+                        aiffDataOffset += 3
+                    }
+
+                    break;
+                }
+
+                case 32: {
+                    while (wavDataOffset < wavFileSize) {
+                        wavView.setUint8(wavDataOffset + 0, aiffView.getUint8(aiffDataOffset + 3));
+                        wavView.setUint8(wavDataOffset + 1, aiffView.getUint8(aiffDataOffset + 2));
+                        wavView.setUint8(wavDataOffset + 2, aiffView.getUint8(aiffDataOffset + 1));
+                        wavView.setUint8(wavDataOffset + 3, aiffView.getUint8(aiffDataOffset + 0));
+                        wavDataOffset += 4;
+                        aiffDataOffset += 4
+                    }
+
+                    break;
+                }
+
+                default: {
+                    throw new Error(`Unsupported bit depth: ${bitsPerSample}`);
+                }
+            }
+
+            return wav;
+        }
+
+        document.getElementById('aiffFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    reader.onload = null;
+                    const aiffBuffer = e.target.result;
+                    const wav = aiffToWav(aiffBuffer);
+
+                    audioContext.decodeAudioData(wav, function(buffer) {
+                        wavAudioBuffer = buffer;
+                        console.log('AIFF file converted and loaded successfully');
+                    }, function(err) {
+                        console.error('Error decoding WAV buffer', err);
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        document.getElementById('playButton').addEventListener('click', function() {
+            if (wavAudioBuffer) {
+                const source = audioContext.createBufferSource();
+                source.buffer = wavAudioBuffer;
+                source.connect(audioContext.destination);
+                source.start(0);
+            } else {
+                console.log('No audio file loaded');
+            }
+        });
+    </script>
+</body>
+</html>

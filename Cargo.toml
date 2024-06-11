@@ -1,0 +1,22 @@
+[package]
+name = "aiff_to_wav"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-bindgen = "0.2.92"
+wee_alloc = "0.4.5"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+panic = "abort"
+lto = true
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['--enable-simd']
+[package.metadata.wasm-pack.profile.profiling]
+wasm-opt = ['--enable-simd']
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['--enable-simd']

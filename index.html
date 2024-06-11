@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIFF to WAV Player</title>
+</head>
+<body>
+    <h1>AIFF to WAV Player</h1>
+    <label style="font-size: 48px; cursor: pointer; border: dotted">
+        <input type="file" id="aiffFile" accept=".aiff" style="cursor: pointer">
+    </label>
+
+    <div>
+        <button id="playButton">Play</button>
+    </div>
+
+    <script type="module">
+        import initPromise, { aiff_to_wav } from "./pkg/aiff_to_wav.js";
+
+        window.convertAiffToWav = async function convertAiffToWav(aiffData) {
+            await initPromise
+            const wavData = aiff_to_wav(new Uint8Array(aiffData));
+            return wavData.buffer;
+        }
+    </script>
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let wavAudioBuffer = null;
+
+        document.getElementById('aiffFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    reader.onload = null;
+                    const aiffBuffer = e.target.result;
+
+                    const wav = await convertAiffToWav(aiffBuffer);
+
+                    audioContext.decodeAudioData(wav, function(buffer) {
+                        wavAudioBuffer = buffer;
+                        console.log('AIFF file converted and loaded successfully');
+                    }, function(err) {
+                        console.error('Error decoding WAV buffer', err);
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        document.getElementById('playButton').addEventListener('click', function() {
+            if (wavAudioBuffer) {
+                const source = audioContext.createBufferSource();
+                source.buffer = wavAudioBuffer;
+                source.connect(audioContext.destination);
+                source.start(0);
+            } else {
+                console.log('No audio file loaded');
+            }
+        });
+    </script>
+</body>
+</html>
