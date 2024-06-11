@@ -27,8 +27,11 @@ You will need [wasm-pack](https://github.com/rustwasm/wasm-pack) (`brew install 
 Then build the rust version via:
 
 ```
+export RUSTFLAGS="-C target-feature=+simd128" # might be needed to enable SIMD
 wasm-pack build --target web
 ```
+
+
 
 To load esmodules and wasm your code must be running on a web server. I use `npx http-server` but you can also use a python web server, or anything else that serves the local directory.
 
