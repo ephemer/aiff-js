@@ -19,7 +19,7 @@
         import initPromise, { aiff_to_wav } from "./pkg/aiff_to_wav.js";
 
         window.convertAiffToWav = async function convertAiffToWav(aiffData) {
-            await initPromise
+            await initPromise()
             const wavData = aiff_to_wav(new Uint8Array(aiffData));
             return wavData.buffer;
         }
